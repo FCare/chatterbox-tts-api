@@ -54,7 +54,20 @@ services:
               count: 1
               capabilities: [gpu]
 
-    restart: unless-stopped
+    restart: always
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.chatterbox.rule=Host(`caronboulme.fr`) && PathPrefix(`/chatterbox`)"
+      - "traefik.http.routers.chatterbox.middlewares=chatterbox-stripprefix,chatterbox-addprefix"
+      - "traefik.http.middlewares.chatterbox-stripprefix.stripprefix.prefixes=/chatterbox"
+      - "traefik.http.middlewares.chatterbox-addprefix.headers.customrequestheaders.X-Forwarded-Prefix=/chatterbox"
+      - "traefik.http.routers.chatterbox.entrypoints=websecure"
+      - "traefik.http.routers.chatterbox.tls.certresolver=letsencrypt"
+      - "traefik.http.services.chatterbox.loadbalancer.server.port=${PORT:-4123}"
+
+    networks:
+      - unmute_default
 
     healthcheck:
       test: ['CMD', 'curl', '-f', 'http://localhost:${PORT:-4123}/health']
@@ -83,3 +96,7 @@ volumes:
     driver: local
   chatterbox-longtext-data:
     driver: local
+
+networks:
+  unmute_default:
+    external: true

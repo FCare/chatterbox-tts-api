@@ -3,7 +3,7 @@ Main FastAPI application
 """
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -100,6 +100,13 @@ app.add_middleware(
 # Include the main router
 app.include_router(api_router)
 
+# Add middleware to handle X-Forwarded-Prefix from Traefik
+@app.middleware("http")
+async def add_root_path_from_headers(request: Request, call_next):
+    if forwarded_prefix := request.headers.get("X-Forwarded-Prefix"):
+        request.scope["root_path"] = forwarded_prefix
+    response = await call_next(request)
+    return response
 
 # Error handlers
 @app.exception_handler(HTTPException)
