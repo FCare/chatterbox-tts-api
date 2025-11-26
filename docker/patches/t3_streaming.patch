@@ -1,42 +1,24 @@
 --- a/src/chatterbox/models/t3/t3.py
 +++ b/src/chatterbox/models/t3/t3.py
-@@ -310,7 +310,6 @@ class T3(nn.Module):
- 
-         # Track generated token ids; start with the BOS token.
-         generated_ids = bos_token.clone()
--        predicted = []  # To store the predicted tokens
- 
-         # Instantiate the logits processors.
-         top_p_warper = TopPLogitsWarper(top_p=top_p)
-@@ -330,7 +329,7 @@ class T3(nn.Module):
+@@ -332,7 +332,7 @@ class T3(nn.Module):
          past = output.past_key_values
- 
+
          # ---- Generation Loop using kv_cache ----
--        for i in tqdm(range(max_new_tokens), desc="Sampling", dynamic_ncols=True):
+-        for i in tqdm(range(max_new_tokens)):
 +        for i in range(max_new_tokens):
              logits_step = output.logits[:, -1, :]                
              # CFG combine  → (1, V)
              cond   = logits_step[0:1, :]
-@@ -362,8 +361,8 @@ class T3(nn.Module):
+@@ -362,6 +362,8 @@ class T3(nn.Module):
              probs = torch.softmax(logits, dim=-1)
              next_token = torch.multinomial(probs, num_samples=1)  # shape: (B, 1)
  
--            predicted.append(next_token)
-+            # ⭐ YIELD le token immédiatement au lieu de l'accumuler
-+            yield next_token.squeeze()
++            # ⭐ YIELD token immédiatement pour streaming natif
+             yield next_token.squeeze()
              generated_ids = torch.cat([generated_ids, next_token], dim=1)
  
-             # Check for EOS token.
-             if next_token.view(-1) == self.hp.stop_speech_token:
--                logger.info(f"✅ EOS token detected! Stopping generation at step {i+1}")
-                 break
- 
-             # Get embedding for the new token.
-@@ -386,8 +385,4 @@ class T3(nn.Module):
+@@ -387,4 +389,3 @@ class T3(nn.Module):
              )
              # Update the kv_cache.
              past = output.past_key_values
 -
--        # Concatenate all predicted tokens along the sequence dimension.
--        predicted_tokens = torch.cat(predicted, dim=1)  # shape: (B, num_tokens)
--        return predicted_tokens

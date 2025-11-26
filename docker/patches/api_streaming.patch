@@ -1,86 +1,56 @@
 --- a/app/api/endpoints/speech.py
 +++ b/app/api/endpoints/speech.py
-@@ -241,21 +241,25 @@ async def generate_speech_internal(
-             # Use torch.no_grad() to prevent gradient accumulation
-             with torch.no_grad():
--                # Run TTS generation in executor to avoid blocking
-+                # ⭐ Maintenant model.generate() streaming, récupérer tous les chunks
-                 # Prepare generation kwargs
-                 generate_kwargs = {
-                     "text": chunk,
-                     "audio_prompt_path": voice_sample_path,
-                     "exaggeration": exaggeration,
-                     "cfg_weight": cfg_weight,
--                    "temperature": temperature
-+                    "temperature": temperature,
-+                    "chunk_size": 30,  # Tokens per audio chunk
-                 }
-                 
-                 # Add language_id for multilingual models
-                 if is_multilingual():
-                     generate_kwargs["language_id"] = language_id
-                 
--                audio_tensor = await loop.run_in_executor(
--                    None,
--                    lambda: model.generate(**generate_kwargs)
-+                # Collecter tous les chunks du générateur streaming
-+                audio_chunks_for_text = await loop.run_in_executor(
-+                    None, 
-+                    lambda: list(model.generate(**generate_kwargs))
-                 )
-                 
--                # Ensure tensor is on the correct device and detached
--                if hasattr(audio_tensor, 'detach'):
--                    audio_tensor = audio_tensor.detach()
-+                # Concaténer tous les chunks de ce morceau de texte
-+                if audio_chunks_for_text:
-+                    audio_tensor = torch.cat(audio_chunks_for_text, dim=-1)
-                 
--                audio_chunks.append(audio_tensor)
-+                    # Ensure tensor is on the correct device and detached
-+                    if hasattr(audio_tensor, 'detach'):
-+                        audio_tensor = audio_tensor.detach()
-+                    
-+                    audio_chunks.append(audio_tensor)
+@@ -445,9 +445,17 @@ async def generate_speech_streaming(
+         
+         # Split text using streaming-optimized chunking
+         update_tts_status(request_id, TTSStatus.CHUNKING, "Splitting text for streaming")
+-        chunks = split_text_for_streaming(
++        
++        # ⭐ BYPASS chunking textuel pour streaming natif
++        if len(text) <= Config.MAX_TOTAL_LENGTH:
++            chunks = [text]  # Pas de chunking - streaming direct du modèle
++            print(f"🚀 Streaming natif activé - pas de découpage textuel")
++        else:
++            # Fallback pour textes très longs
++            chunks = split_text_for_streaming(
+             text, 
+             chunk_size=streaming_settings["chunk_size"],
+             strategy=streaming_settings["strategy"],
+             quality=streaming_settings["quality"]
++            )
++            print(f"⚠️ Texte trop long, chunking de secours ({len(chunks)} chunks)")
+         
+         voice_source = "uploaded file" if voice_sample_path != Config.VOICE_SAMPLE_PATH else "configured sample"
+@@ -484,30 +492,42 @@ async def generate_speech_streaming(
              
-             # Periodic memory cleanup during generation
-@@ -485,21 +489,28 @@ async def generate_speech_streaming(
              # Use torch.no_grad() to prevent gradient accumulation
              with torch.no_grad():
 -                # Run TTS generation in executor to avoid blocking
 -                audio_tensor = await loop.run_in_executor(
 -                    None,
 -                    lambda: model.generate(
--                        text=chunk,
--                        audio_prompt_path=voice_sample_path,
--                        exaggeration=exaggeration,
--                        cfg_weight=cfg_weight,
--                        temperature=temperature,
--                        **({'language_id': language_id} if is_multilingual() else {})
--                    )
-+                # ⭐ Utiliser le streaming natif du modèle
++                # ⭐ Streaming natif du modèle avec micro-chunks
 +                generate_kwargs = {
-+                    "text": chunk,
-+                    "audio_prompt_path": voice_sample_path,
-+                    "exaggeration": exaggeration,
-+                    "cfg_weight": cfg_weight,
-+                    "temperature": temperature,
-+                    "chunk_size": 20,  # Tokens per audio chunk pour streaming réactif
+                         text=chunk,
+                         audio_prompt_path=voice_sample_path,
+                         exaggeration=exaggeration,
+                         cfg_weight=cfg_weight,
+                         temperature=temperature,
++                        chunk_size=5,  # Très petits chunks pour réactivité max
+                         **({'language_id': language_id} if is_multilingual() else {})
 +                }
 +                
-+                if is_multilingual():
-+                    generate_kwargs["language_id"] = language_id
-+                
-+                # Stream chaque chunk audio dès qu'il est prêt
++                # ⭐ Stream chaque micro-chunk immédiatement
 +                audio_generator = await loop.run_in_executor(
-+                    None, 
++                    None,
 +                    lambda: model.generate(**generate_kwargs)
+                     )
                  )
                  
 -                # Ensure tensor is on CPU for streaming
 -                if hasattr(audio_tensor, 'cpu'):
 -                    audio_tensor = audio_tensor.cpu()
-+                # Yield chaque chunk immédiatement
++                # Yield chaque micro-chunk dès qu'il arrive
 +                for audio_chunk in audio_generator:
 +                    if hasattr(audio_chunk, 'cpu'):
 +                        audio_chunk = audio_chunk.cpu()
@@ -103,13 +73,16 @@
 +                    audio_chunk = torch.clamp(audio_chunk, -1.0, 1.0)
 +                    audio_tensor_int = (audio_chunk * 32767).to(torch.int16)
 +                    pcm_data = audio_tensor_int.numpy().tobytes()
++                    
++                    # ⭐ YIELD immédiat pour streaming natif
++                    print(f"📡 Micro-chunk: {len(pcm_data)} bytes")
 +                    yield pcm_data
 +                    
-+                    total_samples += audio_chunk.shape[-1] if audio_chunk.dim() > 0 else 0
++                    chunk_samples = audio_chunk.shape[-1] if audio_chunk.dim() > 0 else 0
++                    total_samples += chunk_samples
 +                    
 +                    # Cleanup
 +                    safe_delete_tensors(audio_chunk, audio_tensor_int)
 +                    del pcm_data
              
              # Periodic memory cleanup during generation
-             if i > 0 and i % 3 == 0:  # Every 3 chunks
