@@ -1,0 +1,105 @@
+--- a/src/chatterbox/tts.py
++++ b/src/chatterbox/tts.py
+@@ -208,6 +208,7 @@ class ChatterboxTTS:
+     def generate(
+         self,
+         text,
+         repetition_penalty=1.2,
+         min_p=0.05,
+         top_p=1.0,
+         audio_prompt_path=None,
+         exaggeration=0.5,
+         cfg_weight=0.5,
+         temperature=0.8,
++        chunk_size=50,
+     ):
++        """
++        Generate speech with streaming. Now yields audio chunks instead of returning complete audio.
++        
++        Args:
++            chunk_size: Number of speech tokens to accumulate before generating audio chunk
++            
++        Yields:
++            torch.Tensor: Audio chunks as they are generated
++        """
+         if audio_prompt_path:
+             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
+         else:
+@@ -243,31 +244,42 @@ class ChatterboxTTS:
+         text_tokens = F.pad(text_tokens, (0, 1), value=eot)
+ 
++        speech_tokens_buffer = []
++        
+         with torch.inference_mode():
+-            speech_tokens = self.t3.inference(
++            # ⭐ Utiliser le streaming de T3.inference() 
++            for speech_token in self.t3.inference(
+                 t3_cond=self.conds.t3,
+                 text_tokens=text_tokens,
+                 max_new_tokens=1000,  # TODO: use the value in config
+                 temperature=temperature,
+                 cfg_weight=cfg_weight,
+                 repetition_penalty=repetition_penalty,
+                 min_p=min_p,
+                 top_p=top_p,
+-            )
+-            # Extract only the conditional batch.
+-            speech_tokens = speech_tokens[0]
++            ):
++                speech_tokens_buffer.append(speech_token)
++                
++                # Quand on a assez de tokens, générer un chunk audio
++                if len(speech_tokens_buffer) >= chunk_size:
++                    # Préparer les tokens pour S3Gen
++                    tokens_chunk = torch.stack(speech_tokens_buffer)
++                    tokens_chunk = drop_invalid_tokens(tokens_chunk)
++                    tokens_chunk = tokens_chunk[tokens_chunk < 6561]
++                    
++                    if len(tokens_chunk) > 0:
++                        # Générer le chunk audio
++                        wav_chunk, _ = self.s3gen.inference(
++                            speech_tokens=tokens_chunk.to(self.device),
++                            ref_dict=self.conds.gen,
++                        )
++                        wav_chunk = wav_chunk.squeeze(0).detach().cpu()
++                        watermarked_chunk = self.watermarker.apply_watermark(
++                            wav_chunk.numpy(), sample_rate=self.sr
++                        )
++                        
++                        # ⭐ YIELD le chunk immédiatement
++                        yield torch.from_numpy(watermarked_chunk)
++                    
++                    # Reset buffer
++                    speech_tokens_buffer = []
++            
++            # Traiter les tokens restants dans le buffer
++            if speech_tokens_buffer:
++                tokens_chunk = torch.stack(speech_tokens_buffer)
++                tokens_chunk = drop_invalid_tokens(tokens_chunk)
++                tokens_chunk = tokens_chunk[tokens_chunk < 6561]
++                
++                if len(tokens_chunk) > 0:
++                    wav_chunk, _ = self.s3gen.inference(
++                        speech_tokens=tokens_chunk.to(self.device),
++                        ref_dict=self.conds.gen,
++                    )
++                    wav_chunk = wav_chunk.squeeze(0).detach().cpu()
++                    watermarked_chunk = self.watermarker.apply_watermark(
++                        wav_chunk.numpy(), sample_rate=self.sr
++                    )
++                    yield torch.from_numpy(watermarked_chunk)
+
+-            # TODO: output becomes 1D
+-            speech_tokens = drop_invalid_tokens(speech_tokens)
+-            
+-            speech_tokens = speech_tokens[speech_tokens < 6561]
+-
+-            speech_tokens = speech_tokens.to(self.device)
+-
+-            wav, _ = self.s3gen.inference(
+-                speech_tokens=speech_tokens,
+-                ref_dict=self.conds.gen,
+-            )
+-            wav = wav.squeeze(0).detach().cpu().numpy()
+-            watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
+-        return torch.from_numpy(watermarked_wav).unsqueeze(0)
