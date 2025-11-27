@@ -483,37 +483,43 @@ async def generate_speech_streaming(
             
             # Use torch.no_grad() to prevent gradient accumulation
             with torch.no_grad():
-                # Run TTS generation in executor to avoid blocking
-                audio_tensor = await loop.run_in_executor(
+                # ⭐ Streaming natif du modèle avec micro-chunks
+                generate_kwargs = {
+                    "text": chunk,
+                    "audio_prompt_path": voice_sample_path,
+                    "exaggeration": exaggeration,
+                    "cfg_weight": cfg_weight,
+                    "temperature": temperature,
+                    "chunk_size": 5,  # Très petits chunks pour réactivité max
+                    **({'language_id': language_id} if is_multilingual() else {})
+                }
+                
+                # ⭐ Stream chaque micro-chunk immédiatement
+                audio_generator = await loop.run_in_executor(
                     None,
-                    lambda: model.generate(
-                        text=chunk,
-                        audio_prompt_path=voice_sample_path,
-                        exaggeration=exaggeration,
-                        cfg_weight=cfg_weight,
-                        temperature=temperature,
-                        **({'language_id': language_id} if is_multilingual() else {})
-                    )
+                    lambda: model.generate(**generate_kwargs)
                 )
                 
-                # Ensure tensor is on CPU for streaming
-                if hasattr(audio_tensor, 'cpu'):
-                    audio_tensor = audio_tensor.cpu()
+                # Yield chaque micro-chunk dès qu'il arrive
+                for audio_chunk in audio_generator:
+                    if hasattr(audio_chunk, 'cpu'):
+                        audio_chunk = audio_chunk.cpu()
 
-                # Convert tensor to raw 16-bit PCM data
-                # Clamp values to [-1, 1] before conversion
-                audio_tensor = torch.clamp(audio_tensor, -1.0, 1.0)
-                audio_tensor_int = (audio_tensor * 32767).to(torch.int16)
-                
-                # Yield the raw audio data as bytes
-                pcm_data = audio_tensor_int.numpy().tobytes()
-                yield pcm_data
-                
-                total_samples += audio_tensor.shape[1]
-                
-                # Clean up this chunk
-                safe_delete_tensors(audio_tensor, audio_tensor_int)
-                del pcm_data
+                    # Convert to PCM and yield immediately
+                    audio_chunk = torch.clamp(audio_chunk, -1.0, 1.0)
+                    audio_tensor_int = (audio_chunk * 32767).to(torch.int16)
+                    pcm_data = audio_tensor_int.numpy().tobytes()
+                    
+                    # ⭐ YIELD immédiat pour streaming natif
+                    print(f"📡 Micro-chunk: {len(pcm_data)} bytes")
+                    yield pcm_data
+                    
+                    chunk_samples = audio_chunk.shape[-1] if audio_chunk.dim() > 0 else 0
+                    total_samples += chunk_samples
+                    
+                    # Cleanup
+                    safe_delete_tensors(audio_chunk, audio_tensor_int)
+                    del pcm_data
             
             # Periodic memory cleanup during generation
             if i > 0 and i % 3 == 0:  # Every 3 chunks

@@ -53,21 +53,14 @@ RUN uv pip install setuptools fastapi uvicorn[standard] python-dotenv python-mul
 # RUN uv pip install chatterbox-tts==0.1.4
 
 # Install chatterbox-tts — with the breaking fix (pkuseg package exclusion)
-RUN uv pip install git+https://github.com/travisvn/chatterbox-multilingual.git@exp
+RUN uv pip install git+https://github.com/FCare/chatterbox-multilingual.git@exp
 
 # Added after the install of chatterboxx-tts to hopefully be able to use
 RUN uv pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cu128
 
-# Copy streaming patches and Python script
-COPY docker/patches/ ./patches/
-COPY docker/apply_streaming_patches.py ./apply_streaming_patches.py
-
 # Copy application code
 COPY app/ ./app/
 COPY main.py ./
-
-# Apply all streaming patches (including API patch)
-RUN python3 apply_streaming_patches.py
 
 # Copy voice sample if it exists (optional, can be mounted)
 COPY voice-sample.mp3 ./voice-sample.mp3
