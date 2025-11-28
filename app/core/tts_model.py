@@ -133,7 +133,7 @@ async def initialize_model():
                     "initial_forward_pass_backend": "cudagraphs",
                     "generate_token_backend": "cudagraphs-manual"
                 })
-                model.generate(warmup_text, language_id="fr", t3_params={
+                _model.generate(warmup_text, language_id="fr", t3_params={
                     "initial_forward_pass_backend": "cudagraphs",
                     "generate_token_backend": "cudagraphs-manual"
                 })
