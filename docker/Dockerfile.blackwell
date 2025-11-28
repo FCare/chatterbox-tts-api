@@ -58,16 +58,18 @@ RUN uv pip install git+https://github.com/travisvn/chatterbox-multilingual.git@e
 # Added after the install of chatterboxx-tts to hopefully be able to use
 RUN uv pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cu128
 
-# Copy streaming patches and Python script
+# Copy streaming patches
 COPY docker/patches/ ./patches/
-COPY docker/apply_streaming_patches.py ./apply_streaming_patches.py
+
+# Apply streaming patches to chatterbox-multilingual
+RUN find /app/.venv/lib/python3.11/site-packages -name "chatterbox*" -type d | head -1 | xargs -I {} bash -c 'cd {} && patch -p1 < /app/patches/t3_streaming.patch && patch -p1 < /app/patches/tts_streaming.patch'
 
 # Copy application code
 COPY app/ ./app/
 COPY main.py ./
 
-# Apply all streaming patches (including API patch)
-RUN python3 apply_streaming_patches.py
+# Apply API streaming patch
+RUN cd /app && patch -p1 < patches/api_streaming.patch
 
 # Copy voice sample if it exists (optional, can be mounted)
 COPY voice-sample.mp3 ./voice-sample.mp3
