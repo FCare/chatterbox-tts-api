@@ -129,19 +129,10 @@ async def initialize_model():
                 if hasattr(_model, 'conds') and _model.conds is None:
                     _model.prepare_conditionals(Config.VOICE_SAMPLE_PATH, exaggeration=0.5)
                 # Warmup avec language_id obligatoire
-                _model.generate(warmup_text, language_id="en", t3_params={
-                    "initial_forward_pass_backend": "cudagraphs",
-                    "generate_token_backend": "cudagraphs-manual"
-                })
-                _model.generate(warmup_text, language_id="fr", t3_params={
-                    "initial_forward_pass_backend": "cudagraphs",
-                    "generate_token_backend": "cudagraphs-manual"
-                })
+                _model.generate(warmup_text, language_id="en")
+                _model.generate(warmup_text, language_id="fr")
             else:
-                _model.generate(warmup_text, t3_params={
-                    "initial_forward_pass_backend": "cudagraphs", 
-                    "generate_token_backend": "cudagraphs-manual"
-                })
+                _model.generate(warmup_text)
             print("✓ Model warmed up with cudagraphs")
         
         return _model
