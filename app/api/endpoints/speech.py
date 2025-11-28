@@ -247,31 +247,23 @@ async def generate_speech_internal(
                     "audio_prompt_path": voice_sample_path,
                     "exaggeration": exaggeration,
                     "cfg_weight": cfg_weight,
-                    "temperature": temperature,
-                    "chunk_size": 10  # Chunks plus larges pour génération normale
+                    "temperature": temperature
                 }
                 
                 # Add language_id for multilingual models
                 if is_multilingual():
                     generate_kwargs["language_id"] = language_id
                 
-                audio_generator = await loop.run_in_executor(
+                audio_tensor = await loop.run_in_executor(
                     None,
                     lambda: model.generate(**generate_kwargs)
                 )
                 
-                # Process all chunks from the generator and concatenate
-                chunk_tensors = []
-                for audio_chunk in audio_generator:
-                    # Ensure tensor is on the correct device and detached
-                    if hasattr(audio_chunk, 'detach'):
-                        audio_chunk = audio_chunk.detach()
-                    chunk_tensors.append(audio_chunk)
+                # Ensure tensor is on the correct device and detached
+                if hasattr(audio_tensor, 'detach'):
+                    audio_tensor = audio_tensor.detach()
                 
-                # Concatenate all chunks into a single tensor
-                if chunk_tensors:
-                    audio_tensor = torch.cat(chunk_tensors, dim=-1) if len(chunk_tensors) > 1 else chunk_tensors[0]
-                    audio_chunks.append(audio_tensor)
+                audio_chunks.append(audio_tensor)
             
             # Periodic memory cleanup during generation
             if i > 0 and i % 3 == 0:  # Every 3 chunks
@@ -498,7 +490,7 @@ async def generate_speech_streaming(
                     "exaggeration": exaggeration,
                     "cfg_weight": cfg_weight,
                     "temperature": temperature,
-                    "chunk_size": 5,  # Petits chunks pour réactivité max
+                    "chunk_size": 5,  # Très petits chunks pour réactivité max
                     **({'language_id': language_id} if is_multilingual() else {})
                 }
                 
@@ -701,7 +693,7 @@ async def generate_speech_sse(
             # Use torch.no_grad() to prevent gradient accumulation
             with torch.no_grad():
                 # Run TTS generation in executor to avoid blocking
-                audio_generator = await loop.run_in_executor(
+                audio_tensor = await loop.run_in_executor(
                     None,
                     lambda: model.generate(
                         text=chunk,
@@ -709,23 +701,13 @@ async def generate_speech_sse(
                         exaggeration=exaggeration,
                         cfg_weight=cfg_weight,
                         temperature=temperature,
-                        chunk_size=5,  # Petits chunks pour réactivité max
                         **({'language_id': language_id} if is_multilingual() else {})
                     )
                 )
                 
-                # Process all chunks from the generator
-                audio_chunks = []
-                for audio_chunk in audio_generator:
-                    if hasattr(audio_chunk, 'cpu'):
-                        audio_chunk = audio_chunk.cpu()
-                    audio_chunks.append(audio_chunk)
-                
-                # Concatenate all chunks into a single tensor
-                if audio_chunks:
-                    audio_tensor = torch.cat(audio_chunks, dim=-1) if len(audio_chunks) > 1 else audio_chunks[0]
-                else:
-                    audio_tensor = torch.zeros(1, 0)  # Empty tensor as fallback
+                # Ensure tensor is on CPU for processing
+                if hasattr(audio_tensor, 'cpu'):
+                    audio_tensor = audio_tensor.cpu()
 
                 # Convert tensor to raw 16-bit PCM data
                 audio_tensor = torch.clamp(audio_tensor, -1.0, 1.0)
