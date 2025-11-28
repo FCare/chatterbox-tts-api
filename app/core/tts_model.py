@@ -109,6 +109,21 @@ async def initialize_model():
         _initialization_progress = "Model ready"
         _initialization_error = None
         print(f"✓ Model initialized successfully on {_device}")
+        
+        if _device == 'cuda':
+            import torch
+            print("🚀 Applying performance optimizations...")
+            
+            def t3_to(model, dtype):
+                model.t3.to(dtype=dtype)
+                model.conds.t3.to(dtype=dtype)
+                torch.cuda.empty_cache()
+                return model
+            
+            # Most new GPUs would work the fastest with this, but not all.
+            _model = t3_to(_model, torch.bfloat16)
+            print("✓ Performance optimizations applied")
+        
         return _model
         
     except Exception as e:
