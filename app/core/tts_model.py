@@ -123,6 +123,26 @@ async def initialize_model():
             # Most new GPUs would work the fastest with this, but not all.
             _model = t3_to(_model, torch.bfloat16)
             print("✓ Performance optimizations applied")
+            # Warmup avec cudagraphs
+            warmup_text = "fast generation using cudagraphs-manual, warmup"
+            if _is_multilingual:
+                if hasattr(_model, 'conds') and _model.conds is None:
+                    _model.prepare_conditionals(Config.VOICE_SAMPLE_PATH, exaggeration=0.5)
+                # Warmup avec language_id obligatoire
+                _model.generate(warmup_text, language_id="en", t3_params={
+                    "initial_forward_pass_backend": "cudagraphs",
+                    "generate_token_backend": "cudagraphs-manual"
+                })
+                model.generate(warmup_text, language_id="fr", t3_params={
+                    "initial_forward_pass_backend": "cudagraphs",
+                    "generate_token_backend": "cudagraphs-manual"
+                })
+            else:
+                _model.generate(warmup_text, t3_params={
+                    "initial_forward_pass_backend": "cudagraphs", 
+                    "generate_token_backend": "cudagraphs-manual"
+                })
+            print("✓ Model warmed up with cudagraphs")
         
         return _model
         
