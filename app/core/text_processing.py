@@ -318,49 +318,10 @@ def _split_long_sentence(sentence: str, max_length: int) -> List[str]:
     return [chunk.strip() for chunk in final_chunks if chunk.strip()]
 
 
-def get_streaming_settings(
-    streaming_chunk_size: Optional[int],
-    streaming_strategy: Optional[str],
-    streaming_quality: Optional[str]
-) -> dict:
-    """
-    Get optimized streaming settings based on parameters.
-    
-    Returns a dictionary with optimized settings for streaming.
-    """
-    settings = {
-        "chunk_size": streaming_chunk_size or 200,
-        "strategy": streaming_strategy or "sentence",
-        "quality": streaming_quality or "balanced"
-    }
-    
-    # Apply quality presets if not explicitly overridden
-    if streaming_quality and not streaming_chunk_size:
-        if streaming_quality == "fast":
-            settings["chunk_size"] = 100
-        elif streaming_quality == "high":
-            settings["chunk_size"] = 300
-    
-    if streaming_quality and not streaming_strategy:
-        if streaming_quality == "fast":
-            settings["strategy"] = "word"
-        elif streaming_quality == "high":
-            settings["strategy"] = "paragraph"
-    
-    return settings
-
-
 def concatenate_audio_chunks(audio_chunks: list, sample_rate: int) -> torch.Tensor:
     """Concatenate multiple audio tensors with proper memory management"""
     if len(audio_chunks) == 1:
         return audio_chunks[0]
-    
-    # Add small silence between chunks (0.1 seconds)
-    silence_samples = int(0.1 * sample_rate)
-    
-    # Create silence tensor on the same device as audio chunks
-    device = audio_chunks[0].device if hasattr(audio_chunks[0], 'device') else 'cpu'
-    silence = torch.zeros(1, silence_samples, device=device)
     
     # Use torch.no_grad() to prevent gradient tracking
     with torch.no_grad():
@@ -368,14 +329,11 @@ def concatenate_audio_chunks(audio_chunks: list, sample_rate: int) -> torch.Tens
         
         for i, chunk in enumerate(audio_chunks[1:], 1):
             # Concatenate current result with silence and next chunk
-            concatenated = torch.cat([concatenated, silence, chunk], dim=1)
+            concatenated = torch.cat([concatenated, chunk], dim=1)
             
             # Optional: cleanup intermediate tensors for very long sequences
             if i % 10 == 0:  # Every 10 chunks
                 gc.collect()
-    
-    # Clean up silence tensor
-    del silence
     
     return concatenated
 

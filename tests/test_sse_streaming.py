@@ -26,8 +26,6 @@ def test_sse_streaming():
         "input": test_text,
         "stream_format": "sse",
         "exaggeration": 0.8,
-        "streaming_strategy": "sentence",
-        "streaming_chunk_size": 150
     }
     
     print(f"📝 Text to convert: {test_text}")

@@ -16,8 +16,6 @@ def test_sse_streaming():
         "input": "Hello from the streaming test! This is a comprehensive test of the SSE streaming functionality. We'll generate multiple chunks to test the real-time playback and final audio concatenation. Each chunk should play immediately as it's received, and the final downloadable file should contain all chunks properly merged together.",
         "stream_format": "sse",
         "exaggeration": 0.7,
-        "streaming_strategy": "sentence",
-        "streaming_chunk_size": 80  # Smaller chunks for more streaming events
     }
     
     headers = {
@@ -28,8 +26,6 @@ def test_sse_streaming():
     print("🎵 Testing SSE streaming with multiple chunks...")
     print(f"📝 Text: {payload['input'][:100]}...")
     print(f"🔧 Stream format: {payload['stream_format']}")
-    print(f"📊 Strategy: {payload['streaming_strategy']}")
-    print(f"📏 Chunk size: {payload['streaming_chunk_size']}")
     print()
     
     try:
@@ -118,13 +114,10 @@ def test_multiple_chunk_streaming():
         "input": long_text.strip(),
         "stream_format": "sse",
         "exaggeration": 0.8,
-        "streaming_strategy": "sentence",
-        "streaming_chunk_size": 50  # Very small chunks
     }
     
     print("🎯 Testing multiple chunk streaming...")
     print(f"📝 Text length: {len(long_text)} characters")
-    print(f"📏 Chunk size: {payload['streaming_chunk_size']} chars")
     print()
     
     try:

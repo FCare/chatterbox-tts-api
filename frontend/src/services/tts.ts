@@ -158,18 +158,6 @@ export const createTTSService = (baseUrl: string, sessionId?: string) => ({
       formData.append('voice_file', request.voice_file);
     }
 
-    if (request.streaming_chunk_size !== undefined) {
-      formData.append('streaming_chunk_size', request.streaming_chunk_size.toString());
-    }
-
-    if (request.streaming_strategy) {
-      formData.append('streaming_strategy', request.streaming_strategy);
-    }
-
-    if (request.streaming_quality) {
-      formData.append('streaming_quality', request.streaming_quality);
-    }
-
     // Add session ID for tracking
     if (sessionId) {
       formData.append('session_id', sessionId);

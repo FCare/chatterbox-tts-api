@@ -7,9 +7,6 @@ export interface TTSRequest {
   voice_file?: File;
   session_id?: string;
   stream_format?: 'audio' | 'sse';
-  streaming_chunk_size?: number;
-  streaming_strategy?: 'sentence' | 'paragraph' | 'fixed' | 'word';
-  streaming_quality?: 'fast' | 'balanced' | 'high';
 }
 
 export interface HealthResponse {
