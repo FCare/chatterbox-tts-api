@@ -191,7 +191,9 @@ class LongTextProcessor:
                         language_id=language_id,
                         exaggeration=metadata.parameters.get('exaggeration'),
                         cfg_weight=metadata.parameters.get('cfg_weight'),
-                        temperature=metadata.parameters.get('temperature')
+                        temperature=metadata.parameters.get('temperature'),
+                        quality_mode=metadata.parameters.get('quality_mode') or 'balanced',
+                        stream_chunk_size=metadata.parameters.get('stream_chunk_size') or [20, 50, 100]
                     )
 
                     # Save chunk audio file

@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field, field_validator
 from uuid import UUID
+from app.models.requests import QualityMode
 
 
 class LongTextJobStatus(str, Enum):
@@ -35,6 +36,10 @@ class LongTextRequest(BaseModel):
     cfg_weight: Optional[float] = Field(None, ge=0.0, le=1.0, description="Pace control")
     temperature: Optional[float] = Field(None, ge=0.05, le=5.0, description="Sampling temperature")
     session_id: Optional[str] = Field(None, description="Frontend session ID for tracking")
+    
+    # New parameters for chatterbox-multilingual
+    quality_mode: Optional[QualityMode] = Field(default=QualityMode.BALANCED, description="Quality vs speed trade-off")
+    stream_chunk_size: Optional[List[int]] = Field(default_factory=lambda: [20, 50, 100], description="Progressive chunk sizes for streaming")
 
     @field_validator('input')
     @classmethod

@@ -146,7 +146,9 @@ async def generate_speech_internal(
     language_id: str = "en",
     exaggeration: Optional[float] = None,
     cfg_weight: Optional[float] = None,
-    temperature: Optional[float] = None
+    temperature: Optional[float] = None,
+    quality_mode: str = "balanced",
+    stream_chunk_size: Optional[List[int]] = None
 ) -> io.BytesIO:
     """Internal function to generate speech with given parameters"""
     global REQUEST_COUNTER
@@ -174,6 +176,11 @@ async def generate_speech_internal(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": {"message": "Model not loaded", "type": "model_error"}}
         )
+    
+    # Always use multilingual model for memory efficiency
+    # Default to English if no language_id specified
+    if not language_id:
+        language_id = "en"
 
     # Log memory usage before processing
     initial_memory = None
@@ -212,6 +219,23 @@ async def generate_speech_internal(
         cfg_weight = cfg_weight if cfg_weight is not None else Config.CFG_WEIGHT
         temperature = temperature if temperature is not None else Config.TEMPERATURE
         
+        # Map quality_mode to n_timesteps and set internal parameters
+        quality_mapping = {"fast": 3, "balanced": 5, "quality": 10}
+        effective_quality_mode = quality_mode or "balanced"
+        n_timesteps = quality_mapping.get(effective_quality_mode, 5)
+        
+        # Fixed internal parameters (not exposed to client)
+        max_cache_len = 1500
+        max_new_tokens = 1000
+        repetition_penalty = 1.2
+        min_p = 0.05
+        top_p = 1.0
+        context_window = 50
+        fade_duration = 0.02
+        print_metrics = False
+        t3_params = {}
+        effective_stream_chunk_size = stream_chunk_size or [20, 50, 100]
+        
         # Split text into chunks
         update_tts_status(request_id, TTSStatus.CHUNKING, "Splitting text into chunks")
         chunks = split_text_into_chunks(text, Config.MAX_CHUNK_LENGTH)
@@ -246,13 +270,20 @@ async def generate_speech_internal(
                     "audio_prompt_path": voice_sample_path,
                     "exaggeration": exaggeration,
                     "cfg_weight": cfg_weight,
-                    "temperature": temperature
+                    "temperature": temperature,
+                    "n_timesteps": n_timesteps,
+                    "max_new_tokens": max_new_tokens,
+                    "max_cache_len": max_cache_len,
+                    "repetition_penalty": repetition_penalty,
+                    "min_p": min_p,
+                    "top_p": top_p,
+                    "t3_params": t3_params
                 }
                 
-                # Add language_id for multilingual models
-                if is_multilingual():
-                    generate_kwargs["language_id"] = language_id
+                # Always add language_id (defaulted to "en" if not specified)
+                generate_kwargs["language_id"] = language_id
                 
+                # Use generate() for non-streaming
                 audio_tensor = await loop.run_in_executor(
                     None,
                     lambda: model.generate(**generate_kwargs)
@@ -363,6 +394,8 @@ async def generate_speech_streaming(
     exaggeration: Optional[float] = None,
     cfg_weight: Optional[float] = None,
     temperature: Optional[float] = None,
+    quality_mode: str = "balanced",
+    stream_chunk_size: Optional[List[int]] = None
 ) -> AsyncGenerator[bytes, None]:
     """Streaming function to generate speech with real-time chunk yielding"""
     global REQUEST_COUNTER
@@ -391,6 +424,11 @@ async def generate_speech_streaming(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": {"message": "Model not loaded", "type": "model_error"}}
         )
+    
+    # Always use multilingual model for memory efficiency
+    # Default to English if no language_id specified
+    if not language_id:
+        language_id = "en"
 
     # Log memory usage before processing
     initial_memory = None
@@ -431,6 +469,23 @@ async def generate_speech_streaming(
         cfg_weight = cfg_weight if cfg_weight is not None else Config.CFG_WEIGHT
         temperature = temperature if temperature is not None else Config.TEMPERATURE
         
+        # Map quality_mode to n_timesteps and set internal parameters
+        quality_mapping = {"fast": 3, "balanced": 5, "quality": 10}
+        effective_quality_mode = quality_mode or "balanced"
+        n_timesteps = quality_mapping.get(effective_quality_mode, 5)
+        
+        # Fixed internal parameters (not exposed to client)
+        max_cache_len = 1500
+        max_new_tokens = 1000
+        repetition_penalty = 1.2
+        min_p = 0.05
+        top_p = 1.0
+        context_window = 50
+        fade_duration = 0.02
+        print_metrics = False
+        t3_params = {}
+        effective_stream_chunk_size = stream_chunk_size or [20, 50, 100]
+        
         # Split text using streaming-optimized chunking
         update_tts_status(request_id, TTSStatus.CHUNKING, "Splitting text for streaming")
         
@@ -447,8 +502,6 @@ async def generate_speech_streaming(
         wav_header = create_wav_header(sample_rate, channels, bits_per_sample)
         yield wav_header
         
-        # Generate and stream audio for each chunk
-        loop = asyncio.get_event_loop()
         total_samples = 0
         
         # Update progress
@@ -456,38 +509,48 @@ async def generate_speech_streaming(
             
         # Use torch.no_grad() to prevent gradient accumulation
         with torch.no_grad():
-            # Run TTS generation in executor to avoid blocking
-            audio_tensor = await loop.run_in_executor(
-                None,
-                lambda: model.generate(
-                    text=text,
-                    audio_prompt_path=voice_sample_path,
-                    exaggeration=exaggeration,
-                    cfg_weight=cfg_weight,
-                    temperature=temperature,
-                    **({'language_id': language_id} if is_multilingual() else {})
-                )
-            )
+            """Generator function to run in executor"""
+            # Prepare streaming generation kwargs
+            stream_kwargs = {
+                "text": text,
+                "audio_prompt_path": voice_sample_path,
+                "exaggeration": exaggeration,
+                "cfg_weight": cfg_weight,
+                "temperature": temperature,
+                "n_timesteps": n_timesteps,
+                "max_new_tokens": max_new_tokens,
+                "max_cache_len": max_cache_len,
+                "repetition_penalty": repetition_penalty,
+                "min_p": min_p,
+                "top_p": top_p,
+                "stream_chunk_size": effective_stream_chunk_size,
+                "context_window": context_window,
+                "fade_duration": fade_duration,
+                "print_metrics": print_metrics,
+                "t3_params": t3_params
+            }
+            
+            # Always add language_id (defaulted to "en" if not specified)
+            stream_kwargs["language_id"] = language_id
+            
+            for audio_chunk, metrics in model.generate_stream(**stream_kwargs):
+                # Real-time metrics available
+                if metrics.latency_to_first_chunk:
+                    print(f"First chunk latency: {metrics.latency_to_first_chunk:.3f}s")
+                else:
+                    print(f"Generated chunk {metrics.chunk_count}, RTF: {metrics.rtf:.3f}" if metrics.rtf else f"Chunk {metrics.chunk_count}")
                 
-            # Ensure tensor is on CPU for streaming
-            if hasattr(audio_tensor, 'cpu'):
-                audio_tensor = audio_tensor.cpu()
+                # Only process non-empty chunks
+                if audio_chunk is not None and audio_chunk.numel() > 0:
+                    # Convert tensor to bytes PCM for HTTP streaming
+                    # Note: audio_chunk arrives already on CPU via .detach().cpu() from model
+                    audio_tensor = torch.clamp(audio_chunk, -1.0, 1.0)
+                    audio_tensor_int = (audio_tensor * 32767).to(torch.int16)
+                    pcm_data = audio_tensor_int.numpy().tobytes()
+                    yield pcm_data
+                else:
+                    print("  ⚠️  Received None or empty chunk, skipping...")
 
-            # Convert tensor to raw 16-bit PCM data
-            # Clamp values to [-1, 1] before conversion
-            audio_tensor = torch.clamp(audio_tensor, -1.0, 1.0)
-            audio_tensor_int = (audio_tensor * 32767).to(torch.int16)
-            
-            # Yield the raw audio data as bytes
-            pcm_data = audio_tensor_int.numpy().tobytes()
-            yield pcm_data
-            
-            total_samples += audio_tensor.shape[1]
-            
-            # Clean up this chunk
-            safe_delete_tensors(audio_tensor, audio_tensor_int)
-            del pcm_data
-            
             import gc
             gc.collect()
             if torch.cuda.is_available():
@@ -533,6 +596,8 @@ async def generate_speech_sse(
     exaggeration: Optional[float] = None,
     cfg_weight: Optional[float] = None,
     temperature: Optional[float] = None,
+    quality_mode: str = "balanced",
+    stream_chunk_size: Optional[List[int]] = None
 ) -> AsyncGenerator[str, None]:
     """Generate Server-Side Events for speech streaming (OpenAI compatible format)"""
     global REQUEST_COUNTER
@@ -603,6 +668,23 @@ async def generate_speech_sse(
         cfg_weight = cfg_weight if cfg_weight is not None else Config.CFG_WEIGHT
         temperature = temperature if temperature is not None else Config.TEMPERATURE
         
+        # Map quality_mode to n_timesteps and set internal parameters
+        quality_mapping = {"fast": 3, "balanced": 5, "quality": 10}
+        effective_quality_mode = quality_mode or "balanced"
+        n_timesteps = quality_mapping.get(effective_quality_mode, 5)
+        
+        # Fixed internal parameters (not exposed to client)
+        max_cache_len = 1500
+        max_new_tokens = 1000
+        repetition_penalty = 1.2
+        min_p = 0.05
+        top_p = 1.0
+        context_window = 50
+        fade_duration = 0.02
+        print_metrics = False
+        t3_params = {}
+        effective_stream_chunk_size = stream_chunk_size or [20, 50, 100]
+        
         voice_source = "uploaded file" if voice_sample_path != Config.VOICE_SAMPLE_PATH else "configured sample"
         print(f"SSE Streaming {text} with {voice_source} and parameters:")
         print(f"  - Exaggeration: {exaggeration}")
@@ -631,13 +713,21 @@ async def generate_speech_sse(
             # Run TTS generation in executor to avoid blocking
             audio_tensor = await loop.run_in_executor(
                 None,
+                
                 lambda: model.generate(
                     text=text,
                     audio_prompt_path=voice_sample_path,
                     exaggeration=exaggeration,
                     cfg_weight=cfg_weight,
                     temperature=temperature,
-                    **({'language_id': language_id} if is_multilingual() else {})
+                    n_timesteps=n_timesteps,
+                    max_new_tokens=max_new_tokens,
+                    max_cache_len=max_cache_len,
+                    repetition_penalty=repetition_penalty,
+                    min_p=min_p,
+                    top_p=top_p,
+                    t3_params=t3_params,
+                    language_id=language_id or "en"  # Always include language_id, default to English
                 )
             )
                 
@@ -876,6 +966,8 @@ async def text_to_speech_with_upload(
                         exaggeration=exaggeration,
                         cfg_weight=cfg_weight,
                         temperature=temperature,
+                        quality_mode="balanced",  # Default for upload endpoint
+                        stream_chunk_size=[20, 50, 100]  # Default for upload endpoint
                     ):
                         yield sse_event
                 finally:
@@ -1053,6 +1145,8 @@ async def stream_text_to_speech_with_upload(
                 exaggeration=exaggeration,
                 cfg_weight=cfg_weight,
                 temperature=temperature,
+                quality_mode="balanced",  # Default for upload endpoint
+                stream_chunk_size=[20, 50, 100]  # Default for upload endpoint
             ):
                 yield chunk
         finally:

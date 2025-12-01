@@ -53,7 +53,7 @@ RUN uv pip install setuptools fastapi uvicorn[standard] python-dotenv python-mul
 # RUN uv pip install chatterbox-tts==0.1.4
 
 # Install chatterbox-tts — with the breaking fix (pkuseg package exclusion) 
-RUN uv pip install git+https://github.com/FCare/chatterbox-multilingual.git@exp
+RUN uv pip install --no-cache git+https://github.com/FCare/chatterbox-multilingual.git@stream
 
 # Added after the install of chatterboxx-tts to hopefully be able to use 
 RUN uv pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cu128

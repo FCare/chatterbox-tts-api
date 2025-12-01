@@ -6,7 +6,6 @@ import os
 import asyncio
 from enum import Enum
 from typing import Optional, Dict, Any
-from chatterbox.tts import ChatterboxTTS
 from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 from app.core.mtl import SUPPORTED_LANGUAGES
 from app.config import Config, detect_device
@@ -79,31 +78,19 @@ async def initialize_model():
             if original_load_file:
                 safetensors.torch.load_file = force_cpu_load_file
         
-        # Determine if we should use multilingual model
-        use_multilingual = Config.USE_MULTILINGUAL_MODEL
-        
+        # Always use multilingual model for memory efficiency
         _initialization_progress = "Loading TTS model (this may take a while)..."
         # Initialize model with run_in_executor for non-blocking
         loop = asyncio.get_event_loop()
         
-        if use_multilingual:
-            print(f"Loading Chatterbox Multilingual TTS model...")
-            _model = await loop.run_in_executor(
-                None, 
-                lambda: ChatterboxMultilingualTTS.from_pretrained(device=_device)
-            )
-            _is_multilingual = True
-            _supported_languages = SUPPORTED_LANGUAGES.copy()
-            print(f"✓ Multilingual model initialized with {len(_supported_languages)} languages")
-        else:
-            print(f"Loading standard Chatterbox TTS model...")
-            _model = await loop.run_in_executor(
-                None, 
-                lambda: ChatterboxTTS.from_pretrained(device=_device)
-            )
-            _is_multilingual = False
-            _supported_languages = {"en": "English"}  # Standard model only supports English
-            print(f"✓ Standard model initialized (English only)")
+        print(f"Loading Chatterbox Multilingual TTS model...")
+        _model = await loop.run_in_executor(
+            None,
+            lambda: ChatterboxMultilingualTTS.from_pretrained(device=_device)
+        )
+        _is_multilingual = True
+        _supported_languages = SUPPORTED_LANGUAGES.copy()
+        print(f"✓ Multilingual model initialized with {len(_supported_languages)} languages")
         
         _initialization_state = InitializationState.READY.value
         _initialization_progress = "Model ready"
@@ -123,16 +110,31 @@ async def initialize_model():
             # Most new GPUs would work the fastest with this, but not all.
             _model = t3_to(_model, torch.bfloat16)
             print("✓ Performance optimizations applied")
-            # Warmup avec cudagraphs
+            # Warmup avec cudagraphs pour le modèle multilingue
             warmup_text = "fast generation using cudagraphs-manual, warmup"
-            if _is_multilingual:
-                if hasattr(_model, 'conds') and _model.conds is None:
-                    _model.prepare_conditionals(Config.VOICE_SAMPLE_PATH, exaggeration=0.5)
-                # Warmup avec language_id obligatoire
-                _model.generate(warmup_text, language_id="en")
-                _model.generate(warmup_text, language_id="fr")
-            else:
-                _model.generate(warmup_text)
+            
+            # Warmup avec nouveaux paramètres
+            warmup_params = {
+                "n_timesteps": 3,  # Fast pour warmup
+                "max_new_tokens": 500,
+                "max_cache_len": 1500,
+                "repetition_penalty": 1.2,
+                "min_p": 0.05,
+                "top_p": 1.0,
+                "stream_chunk_size": [20, 50, 100],
+                "context_window": 50,
+                "fade_duration": 0.02,
+                "print_metrics": True,
+                "t3_params": {}
+            }
+            # Warmup en itérant sur le générateur pour qu'il s'exécute réellement
+            print("🔥 Warming up English...")
+            # for _ in _model.generate_stream(warmup_text, language_id="en", **warmup_params):
+            for _ in _model.generate(warmup_text, language_id="en", print_metrics=True, n_timesteps=5):
+                pass  # Consommer le générateur
+            print("🔥 Warming up French...")
+            for _ in _model.generate_stream(warmup_text, language_id="fr", **warmup_params):
+                pass  # Consommer le générateur
             print("✓ Model warmed up with cudagraphs")
         
         return _model
@@ -182,7 +184,7 @@ def is_initializing():
 
 def is_multilingual():
     """Check if the loaded model supports multilingual generation"""
-    return _is_multilingual
+    return True  # Always True since we always use multilingual model
 
 
 def get_supported_languages():
