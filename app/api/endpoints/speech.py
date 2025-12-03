@@ -12,7 +12,7 @@ import base64
 import json
 import struct
 from typing import Optional, List, Dict, Any, AsyncGenerator
-from fastapi import APIRouter, HTTPException, status, Form, File, UploadFile
+from fastapi import APIRouter, HTTPException, status, Form, File, UploadFile, Request
 from fastapi.responses import StreamingResponse
 
 from app.models import TTSRequest, ErrorResponse
@@ -440,29 +440,39 @@ async def generate_speech_streaming(
             stream_kwargs["language_id"] = language_id
             
             for audio_chunk, metrics in model.generate_stream(**stream_kwargs):
-                # Real-time metrics available
-                if metrics.latency_to_first_chunk:
-                    print(f"First chunk latency: {metrics.latency_to_first_chunk:.3f}s")
-                else:
-                    print(f"Generated chunk {metrics.chunk_count}, RTF: {metrics.rtf:.3f}" if metrics.rtf else f"Chunk {metrics.chunk_count}")
-                
-                # Only process non-empty chunks
-                if audio_chunk is not None and hasattr(audio_chunk, 'numel') and audio_chunk.numel() > 0:
-                    try:
-                        # Convert tensor to bytes PCM for HTTP streaming
-                        # Note: audio_chunk arrives already on CPU via .detach().cpu() from model
-                        audio_tensor = torch.clamp(audio_chunk.detach().cpu(), -1.0, 1.0)
-                        audio_tensor_int = (audio_tensor * 32767).to(torch.int16)
-                        pcm_data = audio_tensor_int.numpy().tobytes()
-                        yield pcm_data
-                    except Exception as chunk_error:
-                        print(f"  ⚠️  Error processing chunk: {chunk_error}")
-                        continue
-                else:
-                    if audio_chunk is None:
-                        print("  ⚠️  Received None chunk, skipping...")
+                try:
+                    # Check if task is cancelled (client disconnected)
+                    if asyncio.current_task().cancelled():
+                        print("🛑 Generation task cancelled, stopping")
+                        break
+                    
+                    # Real-time metrics available
+                    if metrics.latency_to_first_chunk:
+                        print(f"First chunk latency: {metrics.latency_to_first_chunk:.3f}s")
                     else:
-                        print(f"  ⚠️  Received invalid chunk (type: {type(audio_chunk)}), skipping...")
+                        print(f"Generated chunk {metrics.chunk_count}, RTF: {metrics.rtf:.3f}" if metrics.rtf else f"Chunk {metrics.chunk_count}")
+                    
+                    # Only process non-empty chunks
+                    if audio_chunk is not None and hasattr(audio_chunk, 'numel') and audio_chunk.numel() > 0:
+                        try:
+                            # Convert tensor to bytes PCM for HTTP streaming
+                            # Note: audio_chunk arrives already on CPU via .detach().cpu() from model
+                            audio_tensor = torch.clamp(audio_chunk.detach().cpu(), -1.0, 1.0)
+                            audio_tensor_int = (audio_tensor * 32767).to(torch.int16)
+                            pcm_data = audio_tensor_int.numpy().tobytes()
+                            yield pcm_data
+                        except Exception as chunk_error:
+                            print(f"  ⚠️  Error processing chunk: {chunk_error}")
+                            continue
+                    else:
+                        if audio_chunk is None:
+                            print("  ⚠️  Received None chunk, skipping...")
+                        else:
+                            print(f"  ⚠️  Received invalid chunk (type: {type(audio_chunk)}), skipping...")
+                            
+                except asyncio.CancelledError:
+                    print("🔌 Client disconnection detected in generation loop, stopping")
+                    raise
 
             import gc
             gc.collect()
@@ -503,7 +513,7 @@ async def generate_speech_streaming(
     summary="Generate speech from text",
     description="Generate speech audio from input text. Supports voice names from the voice library or defaults to configured voice sample. Choose response_format 'wav' or 'pcm' for audio format."
 )
-async def text_to_speech(request: TTSRequest):
+async def text_to_speech(request: TTSRequest, http_request: Request):
     """Generate speech from text using Chatterbox TTS with voice selection support"""
     
     # Resolve voice name to file path and language
@@ -515,23 +525,27 @@ async def text_to_speech(request: TTSRequest):
             # Raw PCM streaming without WAV header
             async def pcm_stream():
                 first_chunk = True
-                async for chunk in generate_speech_streaming(
-                    text=request.input,
-                    voice_sample_path=voice_sample_path,
-                    language_id=language_id,
-                    exaggeration=request.exaggeration,
-                    cfg_weight=request.cfg_weight,
-                    temperature=request.temperature,
-                    quality_mode=request.quality_mode.value if request.quality_mode else "balanced",
-                    stream_chunk_size=request.stream_chunk_size
-                ):
-                    if first_chunk:
-                        first_chunk = False
-                        # Skip WAV header (first 44 bytes) for PCM format
-                        if len(chunk) > 44:
-                            yield chunk[44:]
-                    else:
-                        yield chunk
+                try:
+                    async for chunk in generate_speech_streaming(
+                        text=request.input,
+                        voice_sample_path=voice_sample_path,
+                        language_id=language_id,
+                        exaggeration=request.exaggeration,
+                        cfg_weight=request.cfg_weight,
+                        temperature=request.temperature,
+                        quality_mode=request.quality_mode.value if request.quality_mode else "balanced",
+                        stream_chunk_size=request.stream_chunk_size
+                    ):
+                        if first_chunk:
+                            first_chunk = False
+                            # Skip WAV header (first 44 bytes) for PCM format
+                            if len(chunk) > 44:
+                                yield chunk[44:]
+                        else:
+                            yield chunk
+                except asyncio.CancelledError:
+                    print("🔌 Client disconnected during PCM streaming, stopping TTS generation")
+                    raise
             
             return StreamingResponse(
                 pcm_stream(),
@@ -545,17 +559,26 @@ async def text_to_speech(request: TTSRequest):
             )
         else:
             # WAV streaming with header
+            # WAV streaming with header and disconnect detection
+            async def wav_stream():
+                try:
+                    async for chunk in generate_speech_streaming(
+                        text=request.input,
+                        voice_sample_path=voice_sample_path,
+                        language_id=language_id,
+                        exaggeration=request.exaggeration,
+                        cfg_weight=request.cfg_weight,
+                        temperature=request.temperature,
+                        quality_mode=request.quality_mode.value if request.quality_mode else "balanced",
+                        stream_chunk_size=request.stream_chunk_size
+                    ):
+                        yield chunk
+                except asyncio.CancelledError:
+                    print("🔌 Client disconnected during WAV streaming, stopping TTS generation")
+                    raise
+
             return StreamingResponse(
-                generate_speech_streaming(
-                    text=request.input,
-                    voice_sample_path=voice_sample_path,
-                    language_id=language_id,
-                    exaggeration=request.exaggeration,
-                    cfg_weight=request.cfg_weight,
-                    temperature=request.temperature,
-                    quality_mode=request.quality_mode.value if request.quality_mode else "balanced",
-                    stream_chunk_size=request.stream_chunk_size
-                ),
+                wav_stream(),
                 media_type="audio/wav",
                 headers={
                     "Content-Disposition": "attachment; filename=speech_stream.wav",
@@ -611,6 +634,7 @@ async def text_to_speech(request: TTSRequest):
     description="Generate speech audio from input text with voice library selection or optional custom voice file upload. Choose response_format 'wav' or 'pcm' for audio format."
 )
 async def text_to_speech_with_upload(
+    http_request: Request,
     input: str = Form(..., description="The text to generate audio for", min_length=1, max_length=3000),
     voice: Optional[str] = Form("alloy", description="Voice name from library or OpenAI voice name (defaults to configured sample)"),
     response_format: Optional[str] = Form("wav", description="Audio format: 'wav' (with WAV header) or 'pcm' (raw PCM data)"),
@@ -619,6 +643,8 @@ async def text_to_speech_with_upload(
     exaggeration: Optional[float] = Form(None, description="Emotion intensity (0.25-2.0)", ge=0.25, le=2.0),
     cfg_weight: Optional[float] = Form(None, description="Pace control (0.0-1.0)", ge=0.0, le=1.0),
     temperature: Optional[float] = Form(None, description="Sampling temperature (0.05-5.0)", ge=0.05, le=5.0),
+    quality_mode: Optional[str] = Form("balanced", description="Quality mode: 'fast', 'balanced', or 'quality'"),
+    stream_chunk_size: Optional[List[int]] = Form([20, 50, 100], description="Stream chunk sizes"),
     voice_file: Optional[UploadFile] = File(None, description="Optional voice sample file for custom voice cloning")
 ):
     """Generate speech from text using Chatterbox TTS with optional voice file upload"""
@@ -709,6 +735,9 @@ async def text_to_speech_with_upload(
                                     yield chunk[44:]
                             else:
                                 yield chunk
+                    except asyncio.CancelledError:
+                        print("🔌 Client disconnected during PCM upload streaming, stopping TTS generation")
+                        raise
                     finally:
                         # Clean up temporary voice file
                         if temp_voice_path and os.path.exists(temp_voice_path):
@@ -743,6 +772,9 @@ async def text_to_speech_with_upload(
                             stream_chunk_size=stream_chunk_size
                         ):
                             yield chunk
+                    except asyncio.CancelledError:
+                        print("🔌 Client disconnected during WAV upload streaming, stopping TTS generation")
+                        raise
                     finally:
                         # Clean up temporary voice file
                         if temp_voice_path and os.path.exists(temp_voice_path):
