@@ -277,6 +277,8 @@ async def upload_voice(
         
         # Prepare conditionals cache for the new voice
         try:
+            import gc
+            import torch
             from app.core.tts_model import get_model
             model = get_model()
             if model:
@@ -284,7 +286,7 @@ async def upload_voice(
                 voice_path = metadata["path"]
                 for exaggeration in [i/10.0 for i in range(0, 11)]:  # 0.0, 0.1, 0.2, ..., 1.0
                     try:
-                        model.prepare_conditionals(voice_path, exaggeration)
+                        model.prepare_conditionals_cache(voice_path, exaggeration)
                     except Exception as e:
                         print(f"  ⚠️ Warning: Failed to prepare conditionals for exaggeration={exaggeration:.1f}: {e}")
                         break  # Skip remaining exaggeration values if one fails

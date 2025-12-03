@@ -140,6 +140,7 @@ async def initialize_model():
             # Prepare conditionals cache for all voice library voices
             print("🎯 Preparing conditionals cache for voice library voices...")
             try:
+                import gc
                 from app.core import get_voice_library
                 voice_lib = get_voice_library()
                 voices = voice_lib.list_voices()
@@ -156,7 +157,7 @@ async def initialize_model():
                         print(f"  🎵 Preparing conditionals for voice: {voice_name}")
                         for exaggeration in [i/10.0 for i in range(0, 11)]:  # 0.0, 0.1, 0.2, ..., 1.0
                             try:
-                                _model.prepare_conditionals(voice_path, exaggeration)
+                                _model.prepare_conditionals_cache(voice_path, exaggeration)
                             except Exception as e:
                                 print(f"    ⚠️ Warning: Failed for exaggeration={exaggeration:.1f}: {e}")
                                 break  # Skip remaining exaggeration values for this voice
