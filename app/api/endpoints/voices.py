@@ -275,6 +275,25 @@ async def upload_voice(
         voice_lib = get_voice_library()
         metadata = voice_lib.add_voice(voice_name, file_content, voice_file.filename, language)
         
+        # Prepare conditionals cache for the new voice
+        try:
+            from app.core.tts_model import get_model
+            model = get_model()
+            if model:
+                print(f"🎯 Preparing conditionals cache for new voice: {voice_name}")
+                voice_path = metadata["path"]
+                for exaggeration in [i/10.0 for i in range(0, 11)]:  # 0.0, 0.1, 0.2, ..., 1.0
+                    try:
+                        model.prepare_conditionals(voice_path, exaggeration)
+                    except Exception as e:
+                        print(f"  ⚠️ Warning: Failed to prepare conditionals for exaggeration={exaggeration:.1f}: {e}")
+                        break  # Skip remaining exaggeration values if one fails
+                print(f"✓ Conditionals cache prepared for {voice_name}")
+            else:
+                print(f"⚠️ Model not available, skipping conditionals preparation for {voice_name}")
+        except Exception as e:
+            print(f"⚠️ Warning: Failed to prepare conditionals for voice {voice_name}: {e}")
+        
         return JSONResponse(
             status_code=status.HTTP_201_CREATED,
             content={
