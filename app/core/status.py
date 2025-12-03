@@ -54,7 +54,6 @@ class TTSRequestInfo:
     parameters: Dict[str, Any] = None
     progress: TTSProgressInfo = None
     error_message: Optional[str] = None
-    memory_usage: Dict[str, float] = None
     
     def __post_init__(self):
         """Initialize default values"""
@@ -62,8 +61,6 @@ class TTSRequestInfo:
             self.parameters = {}
         if self.progress is None:
             self.progress = TTSProgressInfo()
-        if self.memory_usage is None:
-            self.memory_usage = {}
     
     @property
     def duration_seconds(self) -> Optional[float]:
@@ -118,7 +115,6 @@ class TTSStatusManager:
         current_step: str = "",
         current_chunk: int = None,
         total_chunks: int = None,
-        memory_usage: Optional[Dict[str, float]] = None,
         error_message: Optional[str] = None
     ):
         """Update request status and progress"""
@@ -145,8 +141,6 @@ class TTSStatusManager:
                         datetime.now(timezone.utc).timestamp() + remaining
                     )
             
-            if memory_usage:
-                self._current_request.memory_usage.update(memory_usage)
             
             if error_message:
                 self._current_request.error_message = error_message
@@ -269,13 +263,12 @@ def update_tts_status(
     current_step: str = "",
     current_chunk: int = None,
     total_chunks: int = None,
-    memory_usage: Optional[Dict[str, float]] = None,
     error_message: Optional[str] = None
 ):
     """Update TTS request status"""
     _status_manager.update_status(
-        request_id, status, current_step, current_chunk, 
-        total_chunks, memory_usage, error_message
+        request_id, status, current_step, current_chunk,
+        total_chunks, error_message
     )
 
 

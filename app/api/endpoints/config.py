@@ -52,11 +52,6 @@ async def get_config():
             "max_chunk_length": Config.MAX_CHUNK_LENGTH,
             "max_total_length": Config.MAX_TOTAL_LENGTH
         },
-        memory_management={
-            "memory_cleanup_interval": Config.MEMORY_CLEANUP_INTERVAL,
-            "cuda_cache_clear_interval": Config.CUDA_CACHE_CLEAR_INTERVAL,
-            "enable_memory_monitoring": Config.ENABLE_MEMORY_MONITORING
-        }
     )
 
 

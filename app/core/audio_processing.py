@@ -90,7 +90,7 @@ def concatenate_audio_files(audio_files: List[Union[str, Path]],
         raise AudioConcatenationError("No audio files provided for concatenation")
 
     if silence_duration_ms is None:
-        silence_duration_ms = Config.LONG_TEXT_SILENCE_PADDING_MS
+        silence_duration_ms = 0  # No silence padding by default
 
     logger.info(f"Concatenating {len(audio_files)} audio files with {silence_duration_ms}ms silence padding")
 

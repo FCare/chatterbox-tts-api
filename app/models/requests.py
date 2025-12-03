@@ -19,9 +19,9 @@ class TTSRequest(BaseModel):
     
     input: str = Field(..., description="The text to generate audio for", min_length=1, max_length=3000)
     voice: Optional[str] = Field("alloy", description="Voice to use (ignored - uses voice sample)")
-    response_format: Optional[str] = Field("wav", description="Audio format (always returns WAV)")
+    response_format: Optional[str] = Field("wav", description="Audio format: 'wav' (with WAV header) or 'pcm' (raw PCM data)")
     speed: Optional[float] = Field(1.0, description="Speed of speech (ignored)")
-    stream_format: Optional[str] = Field("audio", description="Streaming format: 'audio' for raw audio stream, 'sse' for Server-Side Events")
+    stream: Optional[bool] = Field(True, description="Use streaming generation (model.generate_stream) if True, standard generation (model.generate) if False")
     
     # Custom TTS parameters
     exaggeration: Optional[float] = Field(None, description="Emotion intensity", ge=0.25, le=2.0)
@@ -30,7 +30,7 @@ class TTSRequest(BaseModel):
     
     # New parameters for chatterbox-multilingual
     quality_mode: Optional[QualityMode] = Field(default=QualityMode.BALANCED, description="Quality vs speed trade-off")
-    stream_chunk_size: Optional[List[int]] = Field(default_factory=lambda: [20, 50, 100], description="Progressive chunk sizes for streaming")
+    stream_chunk_size: Optional[List[int]] = Field(default=[20, 50, 100], description="Progressive chunk sizes for streaming")
     
     @validator('input')
     def validate_input(cls, v):
@@ -38,10 +38,10 @@ class TTSRequest(BaseModel):
             raise ValueError('Input text cannot be empty')
         return v.strip()
     
-    @validator('stream_format')
-    def validate_stream_format(cls, v):
+    @validator('response_format')
+    def validate_response_format(cls, v):
         if v is not None:
-            allowed_formats = ['audio', 'sse']
+            allowed_formats = ['wav', 'pcm']
             if v not in allowed_formats:
-                raise ValueError(f'stream_format must be one of: {", ".join(allowed_formats)}')
+                raise ValueError(f'response_format must be one of: {", ".join(allowed_formats)}')
         return v

@@ -9,7 +9,6 @@ from fastapi.responses import JSONResponse
 
 from app.core.tts_model import initialize_model
 from app.core.voice_library import get_voice_library
-from app.core.background_tasks import start_background_processor, stop_background_processor
 from app.api.router import api_router
 from app.config import Config
 from app.core.version import get_version
@@ -46,10 +45,6 @@ async def lifespan(app: FastAPI):
     else:
         print("Using system default voice")
 
-    # Start background processor for long text TTS jobs
-    print("Starting long text background processor...")
-    await start_background_processor()
-    print("Long text background processor started")
 
     # Note: We don't await the model initialization here
     # The server will start immediately and health checks will show initialization status
@@ -57,10 +52,6 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown (cleanup if needed)
-    # Stop background processor
-    print("Stopping long text background processor...")
-    await stop_background_processor()
-    print("Long text background processor stopped")
 
     # Cancel model initialization if it's still running
     if not model_init_task.done():

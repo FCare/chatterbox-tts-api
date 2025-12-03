@@ -6,7 +6,7 @@ from fastapi import APIRouter
 
 from app.models import HealthResponse
 from app.config import Config
-from app.core import get_memory_info, add_route_aliases
+from app.core import add_route_aliases
 from app.core.tts_model import (
     get_model, 
     get_device, 
@@ -58,7 +58,6 @@ async def health_check():
             "default_cfg_weight": Config.CFG_WEIGHT,
             "default_temperature": Config.TEMPERATURE
         },
-        memory_info=get_memory_info(),
         initialization_state=init_state,
         initialization_progress=init_progress,
         initialization_error=init_error

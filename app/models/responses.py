@@ -13,7 +13,6 @@ class HealthResponse(BaseModel):
     model_loaded: bool
     device: str
     config: Dict[str, Any]
-    memory_info: Optional[Dict[str, float]] = None
     initialization_state: Optional[str] = None
     initialization_progress: Optional[str] = None
     initialization_error: Optional[str] = None
@@ -42,7 +41,6 @@ class ConfigResponse(BaseModel):
     server: Dict[str, Any]
     model: Dict[str, Any]
     defaults: Dict[str, Any]
-    memory_management: Dict[str, Any]
 
 
 class ErrorResponse(BaseModel):
@@ -107,7 +105,6 @@ class TTSStatusResponse(BaseModel):
     parameters: Optional[Dict[str, Any]] = None
     progress: Optional[TTSProgressResponse] = None
     error_message: Optional[str] = None
-    memory_usage: Optional[Dict[str, float]] = None
     total_requests: int = 0
     message: Optional[str] = None
 
@@ -132,7 +129,6 @@ class APIInfoResponse(BaseModel):
     status: str
     tts_status: TTSStatusResponse
     statistics: TTSStatisticsResponse
-    memory_info: Optional[Dict[str, float]] = None
     recent_requests: Optional[List[Dict[str, Any]]] = None
     uptime_info: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
